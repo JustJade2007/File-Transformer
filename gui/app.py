@@ -215,11 +215,31 @@ class FileTransformerApp(ctk.CTk):
         self._engine.set_max_workers(n)
 
     def on_closing(self):
-        self._engine.shutdown(wait=False)
-        self.destroy()
+        """Cleanly terminate engine, destroy window, and exit process immediately."""
+        try:
+            self._engine.cancel_all()
+            self._engine.shutdown(wait=False)
+        except Exception:
+            pass
+        try:
+            self.quit()
+        except Exception:
+            pass
+        try:
+            self.destroy()
+        except Exception:
+            pass
+        os._exit(0)
 
 
 def run_gui():
     app = FileTransformerApp()
     app.protocol("WM_DELETE_WINDOW", app.on_closing)
-    app.mainloop()
+    try:
+        app.mainloop()
+    finally:
+        try:
+            app.on_closing()
+        except Exception:
+            os._exit(0)
+

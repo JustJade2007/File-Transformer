@@ -209,3 +209,22 @@ __marimo__/
 # Project specific notes and todos
 notes.md
 todo.md
+TODO
+TODO.md
+todo.txt
+TODO.txt
+
+# Client-side AI tools (Antigravity)
+.gemini/
+.agents/
+.antigravity/
+*antigravity*
+
+# API keys and secrets
+keys.md
+keys.txt
+*.key
+*.pem
+.env*
+
+

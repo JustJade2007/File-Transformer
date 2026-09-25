@@ -39,8 +39,8 @@ def get_pyinstaller_base_args(name: str, one_file: bool) -> list:
         "--hidden-import", "fontTools.ttLib",
         "--hidden-import", "markdown",
         "--hidden-import", "tkinterdnd2",
-        # Windows subsystem — use console so CLI works; window mode silences console for GUI
-        "--console",
+        # Windows subsystem — window mode silences console so no command prompt opens
+        "--noconsole",
     ]
 
     if os.path.isfile(ICON_PATH):
@@ -55,29 +55,63 @@ def get_pyinstaller_base_args(name: str, one_file: bool) -> list:
     return args
 
 
+def remove_readonly_and_delete(path: str):
+    if not os.path.exists(path):
+        return
+    import stat
+    def on_err(func, p, exc_info):
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD)
+            func(p)
+        except Exception:
+            pass
+    if os.path.isdir(path):
+        shutil.rmtree(path, onerror=on_err)
+    else:
+        try:
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            os.remove(path)
+        except Exception:
+            pass
+
+
 def build(one_file: bool, suffix: str = ""):
     name = f"FileTransformer{suffix}"
+    # Ensure build workpath and dist target don't have read-only locks
+    if sys.platform == "win32":
+        try:
+            subprocess.run(["cmd.exe", "/c", f"attrib -r -s -h /s /d \"{BUILD_DIR}\\*\" & attrib -r -s -h \"{BUILD_DIR}\""], capture_output=True)
+            subprocess.run(["cmd.exe", "/c", f"attrib -r -s -h /s /d \"{DIST_DIR}\\*\" & attrib -r -s -h \"{DIST_DIR}\""], capture_output=True)
+        except Exception:
+            pass
+
+    target_dir = os.path.join(DIST_DIR, name)
+    target_exe = os.path.join(DIST_DIR, f"{name}.exe")
+    remove_readonly_and_delete(target_dir)
+    remove_readonly_and_delete(target_exe)
+
     args = get_pyinstaller_base_args(name, one_file)
     mode = "onefile" if one_file else "onedir"
-    print(f"\n{'='*60}")
-    print(f"  Building {name} ({mode})...")
-    print(f"{'='*60}\n")
+    print("\n" + "=" * 60)
+    print("  Building " + name + " (" + mode + ")...")
+    print("=" * 60 + "\n")
     result = subprocess.run(args, cwd=ROOT)
     if result.returncode != 0:
-        print(f"[ERROR] PyInstaller build failed for {name}.")
+        print("[ERROR] PyInstaller build failed for " + name + ".")
         sys.exit(result.returncode)
-    print(f"\n[OK] {name} built successfully.")
+    print("\n[OK] " + name + " built successfully.")
+
 
 
 def main():
     print("File-Transformer Build Script")
-    print("─" * 40)
+    print("-" * 40)
 
     # Ensure assets/icon.ico placeholder exists so build does not fail
     assets_dir = os.path.join(ROOT, "assets")
     os.makedirs(assets_dir, exist_ok=True)
     if not os.path.isfile(ICON_PATH):
-        print("[INFO] No icon.ico found in assets/ — building without icon.")
+        print("[INFO] No icon.ico found in assets/ -- building without icon.")
 
     # Build onedir first (faster for testing)
     build(one_file=False, suffix="")
@@ -85,11 +119,11 @@ def main():
     # Build portable onefile
     build(one_file=True, suffix="-Portable")
 
-    print("\n" + "─" * 40)
-    print(f"✓ All builds complete. Output in: {DIST_DIR}")
-    print(f"  • dist/FileTransformer/         (folder bundle)")
-    print(f"  • dist/FileTransformer-Portable.exe  (portable single file)")
-    print("─" * 40 + "\n")
+    print("\n" + "-" * 40)
+    print("[OK] All builds complete. Output in: " + DIST_DIR)
+    print("  * dist/FileTransformer/              (folder bundle)")
+    print("  * dist/FileTransformer-Portable.exe  (portable single file)")
+    print("-" * 40 + "\n")
 
 
 if __name__ == "__main__":

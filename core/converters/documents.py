@@ -1,15 +1,20 @@
 """Document converter supporting DOCX, PDF, Markdown, HTML, TXT, RTF, and EPUB."""
 import os
 import re
+import textwrap
 import time
 import zipfile
 from typing import Callable, Dict, List, Optional, Set
 import xml.etree.ElementTree as ET
+from PIL import Image, ImageDraw
 
 from .base import BaseConverter, ConversionResult
 
 DOC_INPUTS = {"pdf", "docx", "txt", "md", "html", "htm", "rtf", "odt", "epub"}
-DOC_OUTPUTS = {"txt", "pdf", "docx", "html", "md", "png"}
+DOC_OUTPUTS = {"txt", "pdf", "docx", "html", "md", "png", "jpg", "jpeg", "webp", "bmp", "tiff"}
+
+# File formats that do not support multiple pages in a single file
+SINGLE_PAGE_FORMATS = {"png", "jpg", "jpeg", "webp", "bmp"}
 
 
 class DocumentConverter(BaseConverter):
@@ -26,7 +31,7 @@ class DocumentConverter(BaseConverter):
             return DOC_OUTPUTS
         clean = input_ext.lower().lstrip(".")
         if clean == "pdf":
-            return {"txt", "png", "html"}
+            return {"txt", "docx", "html", "md", "png", "jpg", "jpeg", "webp", "bmp", "tiff", "pdf"}
         elif clean == "docx":
             return {"txt", "md", "html", "pdf"}
         elif clean in ("txt", "md"):
@@ -38,12 +43,52 @@ class DocumentConverter(BaseConverter):
         return {"txt", "html", "md"}
 
     def get_default_options(self, source_ext: str, target_ext: str) -> Dict:
-        clean_target = target_ext.lower().lstrip(".")
-        if clean_target == "png":
-            return {"extract_all_pages": False, "page_dpi": 150}
-        elif clean_target == "pdf":
+        clean_src = source_ext.lower().lstrip(".")
+        clean_tgt = target_ext.lower().lstrip(".")
+        if clean_src == "pdf" and clean_tgt in ("png", "jpg", "jpeg", "webp", "bmp", "tiff"):
+            opts = {
+                "dpi": 150,
+                "quality": 92,
+                "page_range": "All",
+            }
+            if clean_tgt == "tiff":
+                opts["export_per_page"] = False
+            return opts
+        elif clean_src == "pdf" and clean_tgt == "pdf":
+            return {"split_pages": False}
+        elif clean_tgt == "pdf":
             return {"font_size": 11, "page_margin": 36}
         return {}
+
+    def _parse_page_range(self, range_str: str, total_pages: int) -> List[int]:
+        """Parse user-supplied page range string (e.g. 'All', '1-3, 5') into 0-based indices."""
+        if not range_str or range_str.lower() == "all":
+            return list(range(total_pages))
+        indices: List[int] = []
+        for part in range_str.split(","):
+            part = part.strip()
+            if not part:
+                continue
+            if "-" in part:
+                sub = part.split("-", 1)
+                try:
+                    start = max(1, int(sub[0].strip()))
+                    end = min(total_pages, int(sub[1].strip()))
+                    for p in range(start, end + 1):
+                        idx = p - 1
+                        if 0 <= idx < total_pages and idx not in indices:
+                            indices.append(idx)
+                except ValueError:
+                    pass
+            else:
+                try:
+                    p = int(part)
+                    idx = p - 1
+                    if 0 <= idx < total_pages and idx not in indices:
+                        indices.append(idx)
+                except ValueError:
+                    pass
+        return indices if indices else list(range(total_pages))
 
     def _extract_text_from_pdf(self, pdf_path: str) -> str:
         import pypdf
@@ -107,13 +152,327 @@ class DocumentConverter(BaseConverter):
             doc.add_paragraph(line)
         doc.save(output_path)
 
-    def _text_to_pdf(self, text: str, output_path: str, title: str = "Document"):
-        """Simple pure Python PDF generation via basic PDF stream or reportlab if present."""
-        # Simple UTF-8 compliant PDF creation
+    def _pdf_to_docx(self, pdf_path: str, output_path: str):
+        """Convert PDF to DOCX with page breaks preserving page boundaries."""
         import pypdf
-        # Create a basic PDF page using pypdf / canvas
-        from pypdf import PdfWriter
-        # If reportlab is available, use it; otherwise create clean structured PDF via pypdf
+        import docx
+        reader = pypdf.PdfReader(pdf_path)
+        doc = docx.Document()
+        for idx, page in enumerate(reader.pages):
+            if idx > 0:
+                doc.add_page_break()
+            text = page.extract_text()
+            if text:
+                for line in text.splitlines():
+                    doc.add_paragraph(line)
+            else:
+                doc.add_paragraph(f"[Page {idx + 1}]")
+        doc.save(output_path)
+
+    def _pdf_to_md(self, pdf_path: str, output_path: str):
+        """Convert PDF to Markdown with explicit page dividers."""
+        import pypdf
+        reader = pypdf.PdfReader(pdf_path)
+        parts = []
+        for idx, page in enumerate(reader.pages):
+            text = (page.extract_text() or "").strip()
+            parts.append(f"## Page {idx + 1}\n\n{text}")
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n\n---\n\n".join(parts))
+
+    def _pdf_to_html(self, pdf_path: str, output_path: str):
+        """Convert PDF to styled HTML with individual page sections."""
+        import pypdf
+        reader = pypdf.PdfReader(pdf_path)
+        page_htmls = []
+        for idx, page in enumerate(reader.pages):
+            text = (page.extract_text() or "").strip()
+            lines = [f"<p>{line}</p>" for line in text.splitlines() if line.strip()]
+            page_content = "\n".join(lines) if lines else "<p><em>[No extractable text]</em></p>"
+            page_htmls.append(f"""<section class="pdf-page" id="page-{idx + 1}">
+  <div class="page-badge">Page {idx + 1} of {len(reader.pages)}</div>
+  <div class="page-body">
+    {page_content}
+  </div>
+</section>""")
+        body = "\n<hr class=\"page-break\"/>\n".join(page_htmls)
+        full_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>{os.path.basename(pdf_path)}</title>
+<style>
+body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 800px; margin: 40px auto; padding: 0 20px; color: #24292e; background: #f8fafc; }}
+.pdf-page {{ background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 36px; margin-bottom: 24px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }}
+.page-badge {{ display: inline-block; font-size: 12px; font-weight: 600; color: #475569; background: #f1f5f9; padding: 4px 12px; border-radius: 12px; margin-bottom: 20px; }}
+.page-break {{ border: 0; height: 1px; background: #cbd5e1; margin: 32px 0; }}
+p {{ margin: 0 0 12px 0; }}
+</style>
+</head>
+<body>
+{body}
+</body>
+</html>"""
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(full_html)
+
+    def _render_page_text_to_canvas(
+        self,
+        text: str,
+        page_num: int,
+        total_pages: int,
+        width: int,
+        height: int,
+        title: str = "",
+    ) -> Image.Image:
+        """Render page text onto a clean, styled canvas."""
+        canvas = Image.new("RGB", (width, height), (255, 255, 255))
+        draw = ImageDraw.Draw(canvas)
+
+        margin_x = max(30, int(width * 0.06))
+        margin_y = max(30, int(height * 0.05))
+        content_width = width - 2 * margin_x
+
+        # Header
+        header_text = title if title else f"Page {page_num} of {total_pages}"
+        draw.text((margin_x, margin_y), header_text[:70], fill=(120, 120, 120))
+        page_indicator = f"Page {page_num}/{total_pages}"
+        draw.text((max(margin_x + 100, width - margin_x - 120), margin_y), page_indicator, fill=(140, 140, 140))
+        rule_y = margin_y + 26
+        draw.line([(margin_x, rule_y), (width - margin_x, rule_y)], fill=(210, 215, 220), width=2)
+
+        # Body text
+        y = rule_y + 24
+        line_height = max(18, int(height * 0.022))
+        max_y = height - margin_y - 40
+        chars_per_line = max(40, content_width // 10)
+
+        lines = text.splitlines() if text.strip() else ["[Blank or Non-Text Page]"]
+        for paragraph in lines:
+            if y >= max_y:
+                draw.text((margin_x, y), "... [content truncated for preview]", fill=(160, 160, 160))
+                break
+            if not paragraph.strip():
+                y += line_height // 2
+                continue
+            wrapped_lines = textwrap.wrap(paragraph, width=chars_per_line)
+            for line in wrapped_lines:
+                if y >= max_y:
+                    break
+                draw.text((margin_x, y), line, fill=(30, 30, 30))
+                y += line_height
+
+        # Footer
+        footer_y = height - margin_y
+        draw.line([(margin_x, footer_y - 18), (width - margin_x, footer_y - 18)], fill=(230, 235, 240), width=1)
+        footer_str = f"- {page_num} -"
+        draw.text((width // 2 - 20, footer_y - 10), footer_str, fill=(140, 140, 140))
+
+        return canvas
+
+    def _save_image(self, img: Image.Image, path: str, ext: str, quality: int):
+        """Save a PIL Image to disk in the desired format, handling transparency where needed."""
+        clean_ext = ext.lower().lstrip(".")
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+
+        if clean_ext in ("jpg", "jpeg"):
+            if img.mode in ("RGBA", "LA") or (img.mode == "P" and "transparency" in img.info):
+                bg = Image.new("RGB", img.size, (255, 255, 255))
+                conv = img.convert("RGBA")
+                bg.paste(conv, mask=conv.split()[3])
+                bg.save(path, "JPEG", quality=quality, optimize=True)
+            else:
+                img.convert("RGB").save(path, "JPEG", quality=quality, optimize=True)
+        elif clean_ext == "png":
+            img.save(path, "PNG", optimize=True)
+        elif clean_ext == "webp":
+            img.save(path, "WEBP", quality=quality)
+        elif clean_ext == "bmp":
+            img.convert("RGB").save(path, "BMP")
+        elif clean_ext in ("tiff", "tif"):
+            img.save(path, "TIFF")
+        else:
+            img.save(path)
+
+    def _convert_pdf_to_images(
+        self,
+        source_path: str,
+        target_path: str,
+        target_format: str,
+        options: Dict,
+        progress_callback: Optional[Callable[[float, str], None]] = None,
+        cancel_event: Optional[object] = None,
+    ) -> ConversionResult:
+        """
+        Convert PDF pages to image format.
+        If target format does not support multiple pages (PNG, JPG, WEBP, BMP),
+        automatically exports one file per page as '{basename}_page_{N}.{ext}'
+        (or directly '{basename}.{ext}' if PDF has only 1 page).
+        """
+        import pypdf
+        start_time = time.time()
+        reader = pypdf.PdfReader(source_path)
+        total_pages = len(reader.pages)
+        if total_pages == 0:
+            return ConversionResult(success=False, error_message="PDF contains no pages.")
+
+        dpi = int(options.get("dpi", 150))
+        quality = int(options.get("quality", 92))
+        page_range_str = str(options.get("page_range", "All")).strip()
+
+        page_indices = self._parse_page_range(page_range_str, total_pages)
+        if not page_indices:
+            page_indices = list(range(total_pages))
+
+        dest_dir = os.path.dirname(os.path.abspath(target_path))
+        base_name = os.path.splitext(os.path.basename(target_path))[0]
+        ext = target_format.lower().lstrip(".")
+        os.makedirs(dest_dir, exist_ok=True)
+
+        is_single_page_target = ext in SINGLE_PAGE_FORMATS
+        export_per_page = options.get("export_per_page", is_single_page_target)
+
+        # Check if pypdfium2 is available for full-fidelity vector rasterization
+        pdfium_doc = None
+        try:
+            import pypdfium2 as pdfium
+            pdfium_doc = pdfium.PdfDocument(source_path)
+        except Exception:
+            pdfium_doc = None
+
+        rendered_images: List[Image.Image] = []
+        exported_paths: List[str] = []
+
+        total_selected = len(page_indices)
+        for step_idx, page_idx in enumerate(page_indices):
+            if cancel_event and getattr(cancel_event, "is_set", lambda: False)():
+                return ConversionResult(success=False, error_message="Cancelled by user.")
+
+            if progress_callback:
+                frac = (step_idx + 0.1) / total_selected
+                progress_callback(frac, f"Exporting page {page_idx + 1} of {total_pages}...")
+
+            img = None
+
+            # 1. Try pypdfium2 high-fidelity rendering
+            if pdfium_doc is not None:
+                try:
+                    p_page = pdfium_doc[page_idx]
+                    img = p_page.render(scale=dpi / 72.0).to_pil()
+                except Exception:
+                    img = None
+
+            # 2. Fallback using pypdf & Pillow
+            if img is None:
+                page_obj = reader.pages[page_idx]
+                pt_w = float(getattr(page_obj.mediabox, "width", 612))
+                pt_h = float(getattr(page_obj.mediabox, "height", 792))
+                w_px = max(200, int(pt_w / 72.0 * dpi))
+                h_px = max(200, int(pt_h / 72.0 * dpi))
+
+                page_images = list(page_obj.images)
+                page_text = page_obj.extract_text() or ""
+
+                if len(page_images) == 1 and len(page_text.strip()) < 50:
+                    # Predominantly an embedded raster image (scanned page)
+                    try:
+                        img = page_images[0].image
+                    except Exception:
+                        img = None
+
+                if img is None:
+                    # Clean typographical canvas rendering
+                    img = self._render_page_text_to_canvas(
+                        text=page_text,
+                        page_num=page_idx + 1,
+                        total_pages=total_pages,
+                        width=w_px,
+                        height=h_px,
+                        title=os.path.basename(source_path),
+                    )
+
+            # Determine destination path for this page
+            if export_per_page:
+                if total_selected == 1:
+                    page_file_path = target_path
+                else:
+                    page_file_path = os.path.join(dest_dir, f"{base_name}_page_{page_idx + 1}.{ext}")
+                self._save_image(img, page_file_path, ext, quality)
+                exported_paths.append(page_file_path)
+            else:
+                rendered_images.append(img)
+
+        # Multi-page image format (e.g. TIFF) where export_per_page is False
+        if not export_per_page and rendered_images:
+            if ext in ("tiff", "tif"):
+                rendered_images[0].save(
+                    target_path,
+                    save_all=True,
+                    append_images=rendered_images[1:],
+                    format="TIFF",
+                )
+                exported_paths.append(target_path)
+            else:
+                self._save_image(rendered_images[0], target_path, ext, quality)
+                exported_paths.append(target_path)
+
+        if progress_callback:
+            progress_callback(1.0, "Complete")
+
+        return ConversionResult(
+            success=True,
+            output_path=exported_paths[0] if exported_paths else target_path,
+            output_paths=exported_paths,
+            duration_seconds=time.time() - start_time,
+            details={
+                "output_files": exported_paths,
+                "page_count": len(exported_paths),
+                "engine": "pypdfium2" if pdfium_doc is not None else "pypdf+pillow",
+            },
+        )
+
+    def _pdf_split_or_copy(self, pdf_path: str, output_path: str, options: Dict) -> ConversionResult:
+        """Handle PDF -> PDF workflows (copy/rewrite, or split per page)."""
+        import pypdf
+        start_time = time.time()
+        reader = pypdf.PdfReader(pdf_path)
+        total_pages = len(reader.pages)
+        split_pages = bool(options.get("split_pages", False))
+
+        if split_pages and total_pages > 1:
+            dest_dir = os.path.dirname(os.path.abspath(output_path))
+            base_name = os.path.splitext(os.path.basename(output_path))[0]
+            exported = []
+            for idx, page in enumerate(reader.pages):
+                writer = pypdf.PdfWriter()
+                writer.add_page(page)
+                page_path = os.path.join(dest_dir, f"{base_name}_page_{idx + 1}.pdf")
+                with open(page_path, "wb") as fp:
+                    writer.write(fp)
+                exported.append(page_path)
+            return ConversionResult(
+                success=True,
+                output_path=exported[0],
+                output_paths=exported,
+                duration_seconds=time.time() - start_time,
+                details={"output_files": exported, "page_count": len(exported)},
+            )
+        else:
+            writer = pypdf.PdfWriter()
+            for page in reader.pages:
+                writer.add_page(page)
+            with open(output_path, "wb") as fp:
+                writer.write(fp)
+            return ConversionResult(
+                success=True,
+                output_path=output_path,
+                output_paths=[output_path],
+                duration_seconds=time.time() - start_time,
+                details={"output_files": [output_path], "page_count": 1},
+            )
+
+    def _text_to_pdf(self, text: str, output_path: str, title: str = "Document"):
+        """Pure Python PDF generation via basic PDF stream or reportlab if present."""
         try:
             from reportlab.lib.pagesizes import letter
             from reportlab.pdfgen import canvas
@@ -222,10 +581,60 @@ class DocumentConverter(BaseConverter):
         os.makedirs(os.path.dirname(os.path.abspath(target_path)), exist_ok=True)
 
         try:
+            # Handle PDF as source
+            if source_ext == "pdf":
+                if target_ext in ("png", "jpg", "jpeg", "webp", "bmp", "tiff"):
+                    return self._convert_pdf_to_images(
+                        source_path=source_path,
+                        target_path=target_path,
+                        target_format=target_ext,
+                        options=opts,
+                        progress_callback=progress_callback,
+                        cancel_event=cancel_event,
+                    )
+                elif target_ext == "docx":
+                    if progress_callback:
+                        progress_callback(0.3, "Converting PDF to DOCX...")
+                    self._pdf_to_docx(source_path, target_path)
+                    if progress_callback:
+                        progress_callback(1.0, "Complete")
+                    return ConversionResult(
+                        success=True,
+                        output_path=target_path,
+                        output_paths=[target_path],
+                        duration_seconds=time.time() - start_time,
+                    )
+                elif target_ext == "md":
+                    if progress_callback:
+                        progress_callback(0.3, "Converting PDF to Markdown...")
+                    self._pdf_to_md(source_path, target_path)
+                    if progress_callback:
+                        progress_callback(1.0, "Complete")
+                    return ConversionResult(
+                        success=True,
+                        output_path=target_path,
+                        output_paths=[target_path],
+                        duration_seconds=time.time() - start_time,
+                    )
+                elif target_ext == "html":
+                    if progress_callback:
+                        progress_callback(0.3, "Converting PDF to HTML...")
+                    self._pdf_to_html(source_path, target_path)
+                    if progress_callback:
+                        progress_callback(1.0, "Complete")
+                    return ConversionResult(
+                        success=True,
+                        output_path=target_path,
+                        output_paths=[target_path],
+                        duration_seconds=time.time() - start_time,
+                    )
+                elif target_ext == "pdf":
+                    return self._pdf_split_or_copy(source_path, target_path, opts)
+
+            # Standard document input reading
             if progress_callback:
                 progress_callback(0.2, f"Reading {source_ext.upper()}...")
 
-            # 1. Extract source text / content
             text_content = ""
             if source_ext == "pdf":
                 text_content = self._extract_text_from_pdf(source_path)
@@ -335,6 +744,7 @@ th {{ background: #f6f8fa; }}
             return ConversionResult(
                 success=True,
                 output_path=target_path,
+                output_paths=[target_path],
                 duration_seconds=time.time() - start_time,
             )
         except Exception as e:

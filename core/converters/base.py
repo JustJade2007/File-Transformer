@@ -11,9 +11,11 @@ class ConversionResult:
     """Represents the outcome of a single file conversion."""
     success: bool
     output_path: Optional[str] = None
+    output_paths: List[str] = field(default_factory=list)
     error_message: Optional[str] = None
     duration_seconds: float = 0.0
     details: Dict = field(default_factory=dict)
+
 
 
 class BaseConverter(ABC):

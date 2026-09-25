@@ -622,6 +622,13 @@ class QueueView(ctk.CTkFrame):
                 if task.output_path and os.path.exists(task.output_path):
                     folder = os.path.dirname(task.output_path)
                     break
+                elif getattr(task, "output_paths", None) and task.output_paths:
+                    for p in task.output_paths:
+                        if os.path.exists(p):
+                            folder = os.path.dirname(p)
+                            break
+                    if folder:
+                        break
         if folder and os.path.isdir(folder):
             if sys.platform == "win32":
                 os.startfile(folder)
@@ -643,10 +650,14 @@ class QueueView(ctk.CTkFrame):
         row = self._rows.get(task_id)
         if row:
             task = row._task
-            final_text = "✓ Done" if result.success else f"✗ {result.error_message or 'Error'}"
+            if result.success and len(getattr(result, "output_paths", [])) > 1:
+                final_text = f"✓ Done ({len(result.output_paths)} files)"
+            else:
+                final_text = "✓ Done" if result.success else f"✗ {result.error_message or 'Error'}"
             row.after(0, lambda: row.update_progress(
                 1.0 if result.success else 0.0,
                 final_text,
                 task.status,
             ))
             row.after(0, lambda: self._btn_open.configure(state="normal"))
+
