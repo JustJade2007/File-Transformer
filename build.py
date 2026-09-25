@@ -38,8 +38,8 @@ def get_pyinstaller_base_args(name: str, one_file: bool) -> list:
         "--hidden-import", "fontTools.ttLib",
         "--hidden-import", "markdown",
         "--hidden-import", "tkinterdnd2",
-        # Windows subsystem — use console so CLI works; window mode silences console for GUI
-        "--console",
+        # Windows subsystem — window mode silences console so no command prompt opens
+        "--noconsole",
     ]
 
     if os.path.isfile(ICON_PATH):
@@ -54,6 +54,26 @@ def get_pyinstaller_base_args(name: str, one_file: bool) -> list:
     return args
 
 
+def remove_readonly_and_delete(path: str):
+    if not os.path.exists(path):
+        return
+    import stat
+    def on_err(func, p, exc_info):
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD)
+            func(p)
+        except Exception:
+            pass
+    if os.path.isdir(path):
+        shutil.rmtree(path, onerror=on_err)
+    else:
+        try:
+            os.chmod(path, stat.S_IWRITE | stat.S_IREAD)
+            os.remove(path)
+        except Exception:
+            pass
+
+
 def build(one_file: bool, suffix: str = ""):
     name = f"FileTransformer{suffix}"
     # Ensure build workpath and dist target don't have read-only locks
@@ -63,6 +83,11 @@ def build(one_file: bool, suffix: str = ""):
             subprocess.run(["cmd.exe", "/c", f"attrib -r -s -h /s /d \"{DIST_DIR}\\*\" & attrib -r -s -h \"{DIST_DIR}\""], capture_output=True)
         except Exception:
             pass
+
+    target_dir = os.path.join(DIST_DIR, name)
+    target_exe = os.path.join(DIST_DIR, f"{name}.exe")
+    remove_readonly_and_delete(target_dir)
+    remove_readonly_and_delete(target_exe)
 
     args = get_pyinstaller_base_args(name, one_file)
     mode = "onefile" if one_file else "onedir"

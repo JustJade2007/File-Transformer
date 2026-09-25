@@ -111,6 +111,7 @@ class ConversionEngine:
 
     def cancel_all(self):
         """Cancel all active tasks."""
+        self._global_cancel.set()
         with self._lock:
             ids = list(self._tasks.keys())
         for tid in ids:
@@ -136,6 +137,8 @@ class ConversionEngine:
                 self._futures.pop(tid, None)
 
     def shutdown(self, wait: bool = True):
+        if not wait:
+            self.cancel_all()
         if self._executor:
             self._executor.shutdown(wait=wait, cancel_futures=not wait)
 

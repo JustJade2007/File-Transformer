@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.1.0] - 2026-09-25
+
+### Changed
+- **Windowed Executable Mode**: Configured PyInstaller (`--noconsole` / `console=False`) so launching the application executable does not pop up a command prompt window or leave a console window open in the background.
+- **Clean Application Lifecycle & Exit**: Enhanced application shutdown hooks (`WM_DELETE_WINDOW`, `on_closing`) with engine task cancellation, worker pool shutdown, and clean process termination to guarantee no background processes or threads linger after exit.
+- **Safe Stream Fallbacks**: Configured fallback dummy streams for `sys.stdout` and `sys.stderr` under windowed execution, and dynamic console attachment (`AttachConsole`) when CLI arguments are supplied from an existing terminal.
+- **Launcher Batch Script**: Updated `FileTransformer.bat` to launch via `pythonw` when double-clicked without arguments.
+
 ## [1.2.0.0] - 2026-09-14
 
 ### Added
