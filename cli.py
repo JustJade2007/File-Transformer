@@ -10,6 +10,14 @@ import threading
 import time
 from typing import List
 
+# Ensure safe console output across all Windows terminals
+if sys.platform == "win32":
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
@@ -154,8 +162,14 @@ def run_cli(args: List[str] = None):
         result = results.get(task.task_id)
         fname = os.path.basename(task.source_path)
         if result and result.success:
-            out_name = os.path.basename(result.output_path or task.output_path or "")
-            print(f"  ✓  {fname} → {out_name}")
+            paths = getattr(result, "output_paths", None) or ([result.output_path] if result.output_path else [])
+            if len(paths) > 1:
+                print(f"  ✓  {fname} → {len(paths)} files:")
+                for p in paths:
+                    print(f"       • {os.path.basename(p)}")
+            else:
+                out_name = os.path.basename(result.output_path or task.output_path or "")
+                print(f"  ✓  {fname} → {out_name}")
         elif result:
             print(f"  ✗  {fname}: {result.error_message}")
         else:
@@ -164,3 +178,8 @@ def run_cli(args: List[str] = None):
     print()
     engine.shutdown(wait=False)
     return 0 if error_count == 0 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(run_cli(sys.argv[1:]))
+

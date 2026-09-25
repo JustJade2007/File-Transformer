@@ -23,11 +23,13 @@ A fully **local, privacy-focused** file conversion desktop application (and unif
 | **Audio**  | MP3, WAV, FLAC, AAC, OGG, M4A, WMA, AIFF, MIDI               | MP3, WAV, FLAC, AAC, OGG, M4A, WMA, AIFF, MP4, WEBM  |
 | **Video**  | MP4, MKV, MOV, WEBM, AVI, WMV, FLV, M4V                      | MP4, MKV, MOV, WEBM, AVI, GIF, all audio formats     |
 | **Images** | PNG, JPG, WEBP, BMP, ICO, TIFF, GIF, PSD, EPS                | PNG, JPG, WEBP, BMP, ICO, TIFF, GIF, PDF             |
-| **Documents** | PDF, DOCX, TXT, MD, HTML, RTF, ODT, EPUB                  | TXT, PDF, DOCX, HTML, MD, PNG                        |
+| **Documents** | PDF, DOCX, TXT, MD, HTML, RTF, ODT, EPUB                  | TXT, PDF, DOCX, HTML, MD, PNG, JPG, WEBP, BMP, TIFF  |
 | **Data**   | CSV, TSV, JSON, XML, YAML, XLSX, SQLite, SQL                  | CSV, TSV, JSON, XML, YAML, XLSX, SQL, SQLite         |
 | **Archives** | ZIP, TAR, GZ, BZ2, APK, JAR, DEB                           | ZIP, TAR, TAR.GZ, TAR.BZ2, GZ, BZ2                  |
 | **Fonts**  | TTF, OTF, WOFF, WOFF2                                         | TTF, OTF, WOFF, WOFF2                                |
 | **Code**   | PY, JS, TS, JAVA, C, CPP, CS, GO, RS, SH, BAT, PS1, etc.    | HTML, Markdown, PDF, TXT                             |
+
+> **Note on Multi-Page PDF Exports**: When transforming a multi-page PDF into formats that do not support multiple pages (such as PNG, JPG, JPEG, WEBP, BMP), File-Transformer automatically exports a dedicated file for each page (e.g. `document_page_1.png`, `document_page_2.png`) to prevent data loss. For document targets (DOCX, Markdown, HTML, TXT, multi-page TIFF), all pages and structural breaks are preserved in a single file.
 
 ---
 

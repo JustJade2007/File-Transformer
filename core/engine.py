@@ -35,6 +35,7 @@ class ConversionTask:
     status_text: str = "Queued"
     result: Optional[ConversionResult] = None
     output_path: Optional[str] = None
+    output_paths: List[str] = field(default_factory=list)
     cancel_event: threading.Event = field(default_factory=threading.Event)
 
     # Callbacks wired by engine
@@ -179,9 +180,13 @@ class ConversionEngine:
             task.result = result
             if result.success:
                 task.status = TaskStatus.DONE
-                task.status_text = "Done"
                 task.progress = 1.0
                 task.output_path = result.output_path or output_path
+                task.output_paths = result.output_paths or ([task.output_path] if task.output_path else [])
+                if len(task.output_paths) > 1:
+                    task.status_text = f"Done ({len(task.output_paths)} files)"
+                else:
+                    task.status_text = "Done"
             elif task.cancel_event.is_set():
                 task.status = TaskStatus.CANCELLED
                 task.status_text = "Cancelled"

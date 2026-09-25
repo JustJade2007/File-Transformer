@@ -2,7 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.2.0.0] - 2026-09-14
+
+### Added
+- **Expanded PDF Conversions**: PDFs can now be converted to PNG, JPG, JPEG, WEBP, BMP, TIFF, DOCX, Markdown, HTML, TXT, and split PDF.
+- **Automatic Per-Page Export**: Multi-page PDFs transformed into formats that do not support multiple pages (PNG, JPG, WEBP, BMP) automatically export a dedicated file per page (e.g. `doc_page_1.png`, `doc_page_2.png`) to eliminate data loss.
+- **Multi-File Output Tracking**: `ConversionResult` and `ConversionTask` now include `output_paths` to track and surface all generated files across the conversion queue and CLI summary report.
+- **Advanced PDF Controls**: Added configurable DPI (72-300), JPEG/WebP quality (1-100), page range filtering ("All", "1-3, 5"), and PDF page splitting options.
+- **DOCX/HTML/MD Multi-Page Preservation**: Added page breaks (`doc.add_page_break()`), structured HTML `<section>` blocks, and Markdown dividing rules to preserve multi-page layouts when exporting PDFs to rich text formats.
+
 ## [1.1.0.0] - 2026-09-06
+
 
 ### Added
 
