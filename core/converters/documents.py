@@ -140,6 +140,7 @@ class DocumentConverter(BaseConverter):
     def _extract_text_from_rtf(self, rtf_path: str) -> str:
         with open(rtf_path, "r", encoding="utf-8", errors="replace") as f:
             content = f.read()
+        # Basic RTF control word stripper
         clean = re.sub(r"\\[a-z0-9\-]+ ?", "", content)
         clean = re.sub(r"[{}\\]", "", clean)
         return clean.strip()
@@ -482,11 +483,13 @@ p {{ margin: 0 0 12px 0; }}
                 if y < 50:
                     c.showPage()
                     y = height - 50
+                # ASCII safe display
                 safe_line = line.encode("latin-1", "replace").decode("latin-1")
                 c.drawString(50, y, safe_line[:95])
                 y -= 14
             c.save()
         except ImportError:
+            # Fallback using reportlab-free minimal PDF generator
             self._minimal_pdf_write(text, output_path, title)
 
     def _minimal_pdf_write(self, text: str, output_path: str, title: str):
@@ -494,14 +497,18 @@ p {{ margin: 0 0 12px 0; }}
         max_lines_per_page = 50
         pages = [lines[i:i + max_lines_per_page] for i in range(0, max(1, len(lines)), max_lines_per_page)]
 
+        # Construct standard PDF objects
         objects = []
         page_obj_ids = []
 
+        # Object 1: Catalog
         objects.append(b"<< /Type /Catalog /Pages 2 0 R >>")
+        # Object 2: Pages (placeholder, written below)
 
         cur_id = 3
         page_stream_tuples = []
         for p in pages:
+            # Content stream
             text_cmds = ["BT", "/F1 10 Tf", "50 750 Td", "14 TL"]
             for l in p:
                 sanitized = l.replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
@@ -517,16 +524,20 @@ p {{ margin: 0 0 12px 0; }}
             page_obj_ids.append(page_id)
             page_stream_tuples.append((page_id, stream_id, stream_data))
 
+        # Write out bytes
         buf = bytearray(b"%PDF-1.4\n")
         offsets = {}
 
+        # 1: Catalog
         offsets[1] = len(buf)
         buf.extend(b"1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n")
 
+        # 2: Pages
         offsets[2] = len(buf)
         kids_str = " ".join(f"{pid} 0 R" for pid in page_obj_ids)
         buf.extend(f"2 0 obj\n<< /Type /Pages /Kids [{kids_str}] /Count {len(pages)} >>\nendobj\n".encode("latin-1"))
 
+        # Font object
         font_id = cur_id
         offsets[font_id] = len(buf)
         buf.extend(f"{font_id} 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n".encode("latin-1"))
@@ -540,6 +551,7 @@ p {{ margin: 0 0 12px 0; }}
             buf.extend(sdata)
             buf.extend(b"\nendstream\nendobj\n")
 
+        # XRef
         xref_offset = len(buf)
         total_objects = font_id + 1
         buf.extend(f"xref\n0 {total_objects}\n0000000000 65535 f \n".encode("latin-1"))
@@ -644,7 +656,9 @@ p {{ margin: 0 0 12px 0; }}
             if progress_callback:
                 progress_callback(0.6, f"Converting to {target_ext.upper()}...")
 
+            # 2. Convert to Target Format
             if target_ext == "txt":
+                # Strip HTML tags if source was HTML
                 if source_ext in ("html", "htm"):
                     clean = re.sub(r"<[^>]+>", " ", text_content)
                     clean = re.sub(r"\s+", " ", clean).strip()
@@ -654,6 +668,7 @@ p {{ margin: 0 0 12px 0; }}
 
             elif target_ext == "md":
                 if source_ext in ("html", "htm"):
+                    # Basic HTML to MD conversion
                     text_content = re.sub(r"<h1[^>]*>(.*?)</h1>", r"# \1\n", text_content, flags=re.I)
                     text_content = re.sub(r"<h2[^>]*>(.*?)</h2>", r"## \1\n", text_content, flags=re.I)
                     text_content = re.sub(r"<b[^>]*>(.*?)</b>", r"**\1**", text_content, flags=re.I)
@@ -698,6 +713,30 @@ th {{ background: #f6f8fa; }}
 
             elif target_ext == "pdf":
                 self._text_to_pdf(text_content, target_path, title=os.path.basename(source_path))
+
+            elif target_ext == "png" and source_ext == "pdf":
+                # Extract images from PDF pages using pypdf
+                import pypdf
+                reader = pypdf.PdfReader(source_path)
+                found_image = False
+                for page_idx, page in enumerate(reader.pages):
+                    for img_idx, img_file in enumerate(page.images):
+                        with open(target_path, "wb") as fp:
+                            fp.write(img_file.data)
+                        found_image = True
+                        break
+                    if found_image:
+                        break
+                if not found_image:
+                    # If no embedded raster images, write note or render text as image
+                    from PIL import Image, ImageDraw
+                    canvas_img = Image.new("RGB", (800, 1000), color=(255, 255, 255))
+                    draw = ImageDraw.Draw(canvas_img)
+                    y = 30
+                    for line in text_content.splitlines()[:50]:
+                        draw.text((30, y), line[:80], fill=(0, 0, 0))
+                        y += 18
+                    canvas_img.save(target_path, "PNG")
 
             if progress_callback:
                 progress_callback(1.0, "Complete")

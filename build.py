@@ -23,6 +23,7 @@ def get_pyinstaller_base_args(name: str, one_file: bool) -> list:
         "--distpath", DIST_DIR,
         "--workpath", BUILD_DIR,
         "--noconfirm",
+        "--clean",
         # Collect all required packages
         "--collect-all", "customtkinter",
         "--collect-all", "tkinterdnd2",
